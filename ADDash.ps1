@@ -121,16 +121,42 @@ Function Input-Changepass {
         [System.Management.Automation.PSCredential] $AdminCredential
     )
 	
-    $UserCredential = Get-Credential -Message 'Please enter the administrative username and password to use.' -UserName $UserName
+    $UserCredential = Get-Credential -Message 'Please enter the new password for this user.' -UserName $UserName
 	
     $Error.Clear()
     Try {
-        Set-ADAccountPassword -Reset -Identity $UserName -NewPassword $UserCredential.Password -Credential $AdminCredential
+        Set-ADAccountPassword -Reset -Identity $UserCredential.UserName -NewPassword $UserCredential.Password -Credential $AdminCredential
         Out-Dialog 'The password reset was successful.' $DInfo
     } Catch {
         Out-Dialog $Error $DError
     }
+}
 
+Function Format-ListBox {
+    Param(
+        [Parameter(ValueFromPipeline=$true)]
+        [Microsoft.ActiveDirectory.Management.ADObject[]] $ObjectList,
+        [System.Windows.Forms.ListBox] $ListBox
+    )
+
+    $i = 0
+    $ObjectList | ForEach-Object {
+        $i++
+        $ObjectName = $_.Name
+
+        If( -not $_.Enabled ) {
+            $ObjectName += " [Disabled]"
+        } ElseIf( $_.LockedOut ) {
+            $ObjectName += " [Locked]"
+        }
+
+		$ListBox.Items.Add( $ObjectName )
+
+        Write-Progress -Activity "Building Object List" -Status “Adding $ObjectName” `
+            -PercentComplete ($i / $ObjectList.Count * 100)
+	}
+
+    Write-Progress -Activity "Building Object List" -Completed $true
 }
 
 Function Applet-Users {
@@ -156,17 +182,7 @@ Function Applet-Users {
 	$ADDUsers = Get-ADUser -SearchBase 'OU=Users,OU=Albany,DC=domain,DC=local' `
         -Filter $UsersFilter -Properties DistinguishedName,Enabled,Name,SamAccountName,SID,LockedOut | 
         Sort-Object -Property Name
-	$ADDUsers | ForEach-Object {
-        $UserName = $_.Name
-
-        If( -not $_.Enabled ) {
-            $UserName += " [Disabled]"
-        } ElseIf( $_.LockedOut ) {
-            $UserName += " [Locked]"
-        }
-
-		$ADDList.Items.Add( $UserName )
-	}
+	,$ADDUsers | Format-ListBox -ListBox $ADDList
 	$ADDForm.Controls.Add( $ADDList )
 
     $ADDShowDisabled = New-Object System.Windows.Forms.Button
@@ -242,15 +258,7 @@ Function Applet-Computers {
 	$ADDComputers = Get-ADComputer -SearchBase 'OU=Computers,OU=Albany,DC=domain,DC=local' `
         -Filter $Computersfilter -Properties DistinguishedName,Enabled,Name,SamAccountName,SID,LockedOut | 
         Sort-Object -Property Name
-	$ADDComputers | ForEach-Object {
-        $ComputerName = $_.Name
-
-        If( -not $_.Enabled ) {
-            $ComputerName += " [Disabled]"
-        }
-
-    	$ADDList.Items.Add( $ComputerName )
-	}
+	,$ADDComputers | Format-ListBox -ListBox $ADDList
 	$ADDForm.Controls.Add( $ADDList )
 
     $ADDShowDisabled = New-Object System.Windows.Forms.Button
