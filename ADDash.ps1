@@ -123,19 +123,28 @@ Function Input-Changepass {
 	
     $UserCredential = Get-Credential -Message 'Please enter the new password for this user.' -UserName $UserName
 	
-    $Error.Clear()
-    Try {
-        Set-ADAccountPassword -Reset -Identity $UserCredential.UserName -NewPassword $UserCredential.Password -Credential $AdminCredential
+    $InputUserName = $UserCredential.UserName
+    $InputPassword = $UserCredential.Password
+    $Result = Invoke-OnDC $AdminCredential { 
+        $Error.Clear()
+        Try {
+            Set-ADAccountPassword -Reset -Identity $Using:InputUserName -NewPassword $Using:InputPassword
+            Return 0
+        } Catch {
+            Return $Error
+        }
+    }
+    If( $Result -eq 0 ) {
         Out-Dialog 'The password reset was successful.' $DInfo
-    } Catch {
-        Out-Dialog $Error $DError
+    } Else {
+        Out-Dialog $Result $DError
     }
 }
 
 Function Format-ListBox {
     Param(
         [Parameter(ValueFromPipeline=$true)]
-        [Microsoft.ActiveDirectory.Management.ADObject[]] $ObjectList,
+        [Object[]] $ObjectList,
         [System.Windows.Forms.ListBox] $ListBox
     )
 
@@ -159,6 +168,42 @@ Function Format-ListBox {
     Write-Progress -Activity "Building Object List" -Completed $true
 }
 
+Function Invoke-OnDC {
+    Param(
+        [Parameter( Mandatory=$true, Position=0 )]
+        [System.Management.Automation.PSCredential] $AdminCredential,
+        [Parameter( Mandatory=$true, Position=1 )]
+        [scriptblock] $ScriptBlock
+    )
+
+    Return $(Invoke-Command -Credential $AdminCredential -ComputerName "dc01" `
+        -ScriptBlock $ScriptBlock)
+}
+
+Function Get-RemoteADObject {
+    Param(
+        [Parameter( Mandatory=$true )]
+        [string] $OU,
+        [Parameter( Mandatory=$true )]
+        [string] $ObjectType,
+        [Parameter( Mandatory=$true )]
+        [string] $Filter,
+        [System.Management.Automation.PSCredential] $AdminCredential
+    )
+
+    $Properties = "DistinguishedName","Enabled","Name","SamAccountName","SID","LockedOut"
+
+    If( $ObjectType -eq 'User' ) {
+	    $ADDObjects = Invoke-OnDC $AdminCredential { Get-ADUser -SearchBase $Using:OU -Filter $Using:Filter -Properties $Using:Properties } |
+            Sort-Object -Property Name
+    } ElseIf( $ObjectType -eq 'Computer' ) {
+	    $ADDObjects = Invoke-OnDC $AdminCredential { Get-ADComputer -SearchBase $Using:OU -Filter $Using:Filter -Properties $Using:Properties } | 
+            Sort-Object -Property Name
+    }
+
+    Return ,$ADDObjects
+}
+
 Function Applet-Users {
     Param(
         [System.Management.Automation.PSCredential] $AdminCredential,
@@ -167,7 +212,7 @@ Function Applet-Users {
     
     $UsersFilter = '*'
     If( -not $ShowDisabled ) {
-        $UsersFilter = {(Enabled -ne $ShowDisabled)}
+        $UsersFilter = {(Enabled -eq $true)}
     }
 
 	# Build the form.
@@ -179,9 +224,16 @@ Function Applet-Users {
 	$ADDList.Size = New-Object System.Drawing.Size( 260, 200 )
     $ADDList.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
     $ADDList.Add_DrawItem( $UserList_DrawItem )
-	$ADDUsers = Get-ADUser -SearchBase 'OU=Users,OU=Albany,DC=domain,DC=local' `
-        -Filter $UsersFilter -Properties DistinguishedName,Enabled,Name,SamAccountName,SID,LockedOut | 
-        Sort-Object -Property Name
+	#$ADDUsers = Get-ADObject -SearchBase 'OU=Users,OU=Albany,DC=domain,DC=local' `
+    #    -Filter $UsersFilter -Properties DistinguishedName,Enabled,Name,SamAccountName,SID,LockedOut | 
+    #    Sort-Object -Property Name
+    $Error.Clear()
+    $ADDUsers = Get-RemoteADObject -OU 'OU=Users,OU=Albany,DC=domain,DC=local' `
+        -ObjectType 'User' -Filter $UsersFilter -AdminCredential $AdminCredential
+    If( $ADDUsers -eq $null ) {
+        Out-Dialog -Message $Error -DialogType 'Error'
+        Return
+    }
 	,$ADDUsers | Format-ListBox -ListBox $ADDList
 	$ADDForm.Controls.Add( $ADDList )
 
@@ -227,7 +279,8 @@ Function Applet-Users {
 	} ElseIf( $ADDResult -eq [System.Windows.Forms.DialogResult]::Ignore ) {
 		# Unlock account.
 		$SelectedUser = $ADDUsers[$ADDList.SelectedIndex]
-		Unlock-ADAccount -Credential $AdminCredential -Identity $SelectedUser.DistinguishedName
+        $SelectedDN = $SelectedUser.DistinguishedName
+		Invoke-OnDC $AdminCredential { Unlock-ADAccount -Identity $Using:SelectedDN }
 		Out-Dialog "Unlocked account for $($SelectedUser.Name)" $DInfo
         Applet-Users -AdminCredential $AdminCredential -ShowDisabled $ShowDisabled
 	} Else {
@@ -243,7 +296,7 @@ Function Applet-Computers {
     
     $ComputersFilter = '*'
     If( -not $ShowDisabled ) {
-        $ComputersFilter = {(Enabled -ne $ShowDisabled)}
+        $ComputersFilter = {(Enabled -eq $true)}
     }
 
 	# Build the form.
@@ -255,10 +308,14 @@ Function Applet-Computers {
 	$ADDList.Size = New-Object System.Drawing.Size( 260, 200 )
     $ADDList.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
     $ADDList.Add_DrawItem( $UserList_DrawItem )
-	$ADDComputers = Get-ADComputer -SearchBase 'OU=Computers,OU=Albany,DC=domain,DC=local' `
-        -Filter $Computersfilter -Properties DistinguishedName,Enabled,Name,SamAccountName,SID,LockedOut | 
-        Sort-Object -Property Name
-	,$ADDComputers | Format-ListBox -ListBox $ADDList
+    $Error.Clear()
+    $ADDComputers = Get-RemoteADObject -OU 'OU=Computers,OU=Albany,DC=domain,DC=local' `
+        -ObjectType 'Computer' -Filter $ComputersFilter -AdminCredential $AdminCredential
+    ,$ADDComputers | Format-ListBox -ListBox $ADDList
+    If( $ADDComputers -eq $null ) {
+        Out-Dialog -Message $Error -DialogType 'Error'
+        Return
+    }
 	$ADDForm.Controls.Add( $ADDList )
 
     $ADDShowDisabled = New-Object System.Windows.Forms.Button
@@ -290,8 +347,9 @@ Function Applet-Computers {
         }
 	} ElseIf( $ADDResult -eq [System.Windows.Forms.DialogResult]::Ignore ) {
 		# Bitlocker key.
-        $BitLockerObjects = Get-ADObject -Credential $AdminCredential -Filter {objectclass -eq 'msFVE-RecoveryInformation'} `
-            -SearchBase $ADDComputers[$ADDList.SelectedIndex].DistinguishedName -Properties 'msFVE-RecoveryPassword'
+        $SelectedDN = $ADDComputers[$ADDList.SelectedIndex].DistinguishedName
+        $BitLockerObjects = Invoke-OnDC $AdminCredential { Get-ADObject -Filter {objectclass -eq 'msFVE-RecoveryInformation'} `
+            -SearchBase $Using:SelectedDN -Properties 'msFVE-RecoveryPassword' }
         $BitLockerObjects | fl 'msFVE-RecoveryPassword' | Out-String | Out-Dialog -DialogType $DInfo
 
         Applet-Computers -AdminCredential $AdminCredential -ShowDisabled $ShowDisabled
