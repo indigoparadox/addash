@@ -27,7 +27,7 @@ Function Get-AdminCredential {
         [string]$AdminName
     )
 
-	$AdminCredPath = 'J:\ADDash_cred.txt'
+	$AdminCredPath = 'J:\ADDash_cred.' + $ENV:COMPUTERNAME + '.txt'
 	$AdminPassword = ''
 	
     If( Test-Path -Path $AdminCredPath ) {
@@ -60,7 +60,7 @@ Function New-ADDForm {
 
 	$ADDForm.Size = New-Object System.Drawing.Size( $Width, $Height )
     $ADDForm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-    $ADDForm.FormBorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $ADDForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedSingle
     $ADDForm.Text = $Title
     $ADDForm.Icon = [Drawing.Icon]::ExtractAssociatedIcon( (Get-Command mmc).Path )
     
