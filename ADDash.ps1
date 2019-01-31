@@ -8,6 +8,12 @@ Add-Type -AssemblyName System.Drawing
 Set-Variable DInfo -Option Constant -Value 'Information'
 Set-Variable DError -Option Constant -Value 'Error'
 
+#Set-Variable DROK -Option Constant -Value ([System.Windows.Forms.DialogResult]::OK)
+#Set-Variable DRIgnore -Option Constant -Value ([System.Windows.Forms.DialogResult]::Ignore)
+#Set-Variable DRAbort -Option Constant -Value ([System.Windows.Forms.DialogResult]::Abort)
+#Set-Variable DRCancel -Option Constant -Value ([System.Windows.Forms.DialogResult]::Cancel)
+#Set-Variable DRRetry -Option Constant -Value ([System.Windows.Forms.DialogResult]::Retry)
+
 $AddWindowWidth = 290
 $AddWindowHeight = 320
 
@@ -61,6 +67,16 @@ Function New-ADDForm {
 
     $ADDForm = New-Object System.Windows.Forms.Form
 
+    $ADDFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+    #$ADDFlow.Anchor = `
+    #    [System.Windows.Forms.AnchorStyles]::Left + `
+    #    [System.Windows.Forms.AnchorStyles]::Right + `
+    #    [System.Windows.Forms.AnchorStyles]::Bottom + `
+    #    [System.Windows.Forms.AnchorStyles]::Top
+    $ADDFlow.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $ADDFlow.Name = 'Layout'
+    $ADDForm.Controls.Add( $ADDFlow )
+
 	$ADDForm.Size = New-Object System.Drawing.Size( $Width, $Height )
     $ADDForm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
     $ADDForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedSingle
@@ -68,6 +84,39 @@ Function New-ADDForm {
     $ADDForm.Icon = [Drawing.Icon]::ExtractAssociatedIcon( (Get-Command mmc).Path )
     
     Return $ADDForm
+}
+
+Function New-ADDFormControl {
+    Param(
+        [Parameter(Mandatory, Position=0)]
+        [ValidateNotNullOrEmpty()]
+        [System.Windows.Forms.Form] $Parent,
+        [Parameter(ValueFromPipeline=$true)]
+        [ValidateNotNullOrEmpty()]
+        [System.Windows.Forms.Control] $Control,
+        [string] $LabelText = $null
+    )
+
+    $ADDLayouts = $Parent.Controls.Find( 'Layout', $true )
+    If( $ADDLayouts -eq $null -or $ADDLayouts.Length -eq 0 ) {
+        Out-Dialog -Message 'Unable to find control root.' -DialogType 'Error'
+        Return
+    }
+    $ADDLayout = $ADDLayouts.Get( 0 )
+    
+    If( $LabelText -ne $null ) {
+        $ListLabel = New-Object System.Windows.Forms.Label
+        $ListLabel.Text = $LabelText
+        $ListLabel.Location = New-Object System.Drawing.Point( $x, $y )
+        $ListLabel.Size = New-Object System.Drawing.Size( $w, 15 )
+        $y = $y + 15
+	    #$Parent.Controls.Add( $ListLabel )
+        $ADDLayout.Controls.Add( $ListLabel );
+    }
+
+    $ADDLayout.Controls.Add( $Control );
+    
+    Return $Parent
 }
 
 $UserList_DrawItem = {
@@ -144,28 +193,45 @@ Function Input-Changepass {
     }
 }
 
+Function Format-Button {
+    Param(
+        [Parameter(Mandatory, Position=0)]
+        [ValidateNotNullOrEmpty()]
+        [System.Windows.Forms.DialogResult] $DialogResult,
+        [int] $x = 10,
+        [int] $y = 10,
+        [int] $w = 80,
+        [int] $h = 60,
+        [bool] $LabelTest = $true,
+        [string] $Label,
+        [string] $LabelFalse
+    )
+
+    $ADDButton = New-Object System.Windows.Forms.Button
+	$ADDButton.Location = New-Object System.Drawing.Point( $x, $y )
+	$ADDButton.Size = New-Object System.Drawing.Size( $w, $h )
+    If( $LabelTest ) {
+	    $ADDButton.Text = $Label
+    } Else {
+        $ADDButton.Text = $LabelFalse
+    }
+	$ADDButton.DialogResult = $DialogResult
+	#$ADDForm.Controls.Add( $ADDShowDisabled )
+    
+    Return $ADDButton
+}
+
 Function Format-ListBox {
     Param(
         [Parameter(ValueFromPipeline=$true)]
         [Object[]] $ObjectList,
-        [System.Windows.Forms.Form]$Parent,
         [int] $x = 10,
         [int] $y = 10,
         [int] $w = ($ADDWindowWidth - 30),
         [int] $h = 200,
         [bool] $DropDown = $false,
-        [bool] $ForceEnabled = $false,
-        [string] $LabelText = $null
+        [bool] $ForceEnabled = $false
     )
-
-    If( $LabelText -ne $null ) {
-        $ListLabel = New-Object System.Windows.Forms.Label
-        $ListLabel.Text = $LabelText
-        $ListLabel.Location = New-Object System.Drawing.Point( $x, $y )
-        $ListLabel.Size = New-Object System.Drawing.Size( $w, 15 )
-        $y = $y + 15
-	    $Parent.Controls.Add( $ListLabel )
-    }
 
     If( $DropDown -eq $false ) {
 	    $ListBox = New-Object System.Windows.Forms.ListBox
@@ -185,7 +251,8 @@ Function Format-ListBox {
     }
 
     $i = 0
-    $ObjectList | ForEach-Object {
+    # If we don't assign to $null, the list items pollute the return stream.
+    $null = $ObjectList | ForEach-Object {
         $i++
         $ObjectName = $_.Name
 
@@ -203,9 +270,10 @@ Function Format-ListBox {
 
     Write-Progress -Activity "Building Object List" -Completed $true
     
-	$Parent.Controls.Add( $ListBox )
+	#$Parent.Controls.Add( $ListBox )
+    #New-ADDFormControl -Parent $Parent -Control $ListBox
 
-    #Return $ListBox
+    Return $ListBox
 }
 
 Function Invoke-OnDC {
@@ -272,32 +340,16 @@ Function Applet-Users {
         Out-Dialog -Message $Error -DialogType 'Error'
         Return
     }
-	,$ADDUsers | Format-ListBox -Parent $ADDForm
+	,$ADDUsers | Format-ListBox
 
-    $ADDShowDisabled = New-Object System.Windows.Forms.Button
-	$ADDShowDisabled.Location = New-Object System.Drawing.Point( 10, 220 )
-	$ADDShowDisabled.Size = New-Object System.Drawing.Size( 80, 60 )
-    If( $ShowDisabled ) {
-	    $ADDShowDisabled.Text = 'Hide Disabled'
-    } Else {
-        $ADDShowDisabled.Text = 'Show Disabled'
-    }
-	$ADDShowDisabled.DialogResult = [System.Windows.Forms.DialogResult]::OK
-	$ADDForm.Controls.Add( $ADDShowDisabled )
+    Format-Button -DialogResult -Label 'Hide Disabled' -LabelFalse 'Show Disabled' | `
+        New-ADDFormControl -Parent $ADDForm
 
-	$ADDChangePassword = New-Object System.Windows.Forms.Button
-	$ADDChangePassword.Location = New-Object System.Drawing.Point( 100, 220 )
-	$ADDChangePassword.Size = New-Object System.Drawing.Size( 80, 60 )
-	$ADDChangePassword.Text = 'Set Password'
-	$ADDChangePassword.DialogResult = [System.Windows.Forms.DialogResult]::Retry
-	$ADDForm.Controls.Add( $ADDChangePassword )
+    Format-Button -DialogResult Retry -Label 'Set Password' | `
+        New-ADDFormControl -Parent $ADDForm
 
-	$ADDUnlock = New-Object System.Windows.Forms.Button
-	$ADDUnlock.Location = New-Object System.Drawing.Point( 190, 220 )
-	$ADDUnlock.Size = New-Object System.Drawing.Size( 80, 60 )
-	$ADDUnlock.Text = 'Unlock Account'
-	$ADDUnlock.DialogResult = [System.Windows.Forms.DialogResult]::Ignore
-	$ADDForm.Controls.Add( $ADDUnlock )
+    Format-Button -DialogResult Ignore -Label 'Unlock Account' | `
+        New-ADDFormControl -Parent $ADDForm
 
 	$ADDResult = $ADDForm.ShowDialog()
 
@@ -406,29 +458,16 @@ Function Applet-Computers {
     $Error.Clear()
     $ADDComputers = Get-RemoteADObject -OU 'OU=Computers,OU=Albany,DC=domain,DC=local' `
         -ObjectType 'Computer' -Filter $ComputersFilter -AdminCredential $AdminCredential
-    ,$ADDComputers | Format-ListBox -Parent $ADDForm
-    If( $ADDComputers -eq $null ) {
+    $ADDList = Format-ListBox -ObjectList $ADDComputers
+    New-ADDFormControl -Parent $ADDForm -Control $ADDList
+    If( $ADDComputers -eq $null -or $ADDList -eq $null -or $ADDComputers.Length -eq 0 ) {
         Out-Dialog -Message $Error -DialogType 'Error'
         Return
     }
 
-    $ADDShowDisabled = New-Object System.Windows.Forms.Button
-	$ADDShowDisabled.Location = New-Object System.Drawing.Point( 10, 220 )
-	$ADDShowDisabled.Size = New-Object System.Drawing.Size( 80, 60 )
-    If( $ShowDisabled ) {
-	    $ADDShowDisabled.Text = 'Hide Disabled'
-    } Else {
-        $ADDShowDisabled.Text = 'Show Disabled'
-    }
-	$ADDShowDisabled.DialogResult = [System.Windows.Forms.DialogResult]::OK
-	$ADDForm.Controls.Add( $ADDShowDisabled )
-
-	$ADDBitlocker = New-Object System.Windows.Forms.Button
-	$ADDBitlocker.Location = New-Object System.Drawing.Point( 100, 220 )
-	$ADDBitlocker.Size = New-Object System.Drawing.Size( 80, 60 )
-	$ADDBitlocker.Text = 'Bitlocker Key'
-	$ADDBitlocker.DialogResult = [System.Windows.Forms.DialogResult]::Ignore
-	$ADDForm.Controls.Add( $ADDBitlocker )
+    Format-Button -DialogResult OK -Label 'Hide Disabled' -LabelFalse 'Show Disabled' -LabelTest $ShowDisabled | `
+        New-ADDFormControl -Parent $ADDForm
+    Format-Button -DialogResult Ignore -Label 'Bitlocker Key' | New-ADDFormControl -Parent $ADDForm
 
 	$ADDResult = $ADDForm.ShowDialog()
 
@@ -461,37 +500,9 @@ Function Applet-Choose {
 	# Build the form.
 
 	$ADDForm = New-ADDForm -Height 170
-    
-    # oxx
-    # xxx
-
-	$ADDUsers = New-Object System.Windows.Forms.Button
-	$ADDUsers.Location = New-Object System.Drawing.Point( 10, 10 )
-	$ADDUsers.Size = New-Object System.Drawing.Size( 80, 60 )
-	$ADDUsers.Text = 'Users'
-	$ADDUsers.DialogResult = [System.Windows.Forms.DialogResult]::Retry
-	$ADDForm.Controls.Add( $ADDUsers )
-
-    # xox
-    # xxx
-
-	$ADDComputers = New-Object System.Windows.Forms.Button
-	$ADDComputers.Location = New-Object System.Drawing.Point( 100, 10 )
-	$ADDComputers.Size = New-Object System.Drawing.Size( 80, 60 )
-	$ADDComputers.Text = 'Computers'
-	$ADDComputers.DialogResult = [System.Windows.Forms.DialogResult]::Ignore
-	$ADDForm.Controls.Add( $ADDComputers )
-
-    # xxx
-    # oxx
-
-	$ADDNewUser = New-Object System.Windows.Forms.Button
-	$ADDNewUser.Location = New-Object System.Drawing.Point( 10, 70 )
-	$ADDNewUser.Size = New-Object System.Drawing.Size( 80, 60 )
-	$ADDNewUser.Text = 'New User'
-	$ADDNewUser.DialogResult = [System.Windows.Forms.DialogResult]::No
-	$ADDForm.Controls.Add( $ADDNewUser )
-
+    Format-Button -DialogResult Retry -Label 'Users' | New-ADDFormControl -Parent $ADDForm
+    Format-Button -DialogResult Ignore -Label 'Computers' | New-ADDFormControl -Parent $ADDForm
+    Format-Button -DialogResult No -Label 'New User' | New-ADDFormControl -Parent $ADDForm
     $ADDResult = $ADDForm.ShowDialog()
 
 	If( $ADDResult -eq [System.Windows.Forms.DialogResult]::Retry ) {
