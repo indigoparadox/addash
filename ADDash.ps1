@@ -1,303 +1,12 @@
 ﻿#
-# Script.ps1
+# ADDash.ps1
+# A convenient set of tools for doing common tasks with the Active Directory.
 #
-
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-Set-Variable DInfo -Option Constant -Value 'Information'
-Set-Variable DError -Option Constant -Value 'Error'
-
-#Set-Variable DROK -Option Constant -Value ([System.Windows.Forms.DialogResult]::OK)
-#Set-Variable DRIgnore -Option Constant -Value ([System.Windows.Forms.DialogResult]::Ignore)
-#Set-Variable DRAbort -Option Constant -Value ([System.Windows.Forms.DialogResult]::Abort)
-#Set-Variable DRCancel -Option Constant -Value ([System.Windows.Forms.DialogResult]::Cancel)
-#Set-Variable DRRetry -Option Constant -Value ([System.Windows.Forms.DialogResult]::Retry)
-
-$AddWindowWidth = 290
-$AddWindowHeight = 320
 
 $LastSelectedIndex = 0
 
-Function Out-Dialog {
-    Param(
-        [Parameter(Position=0, ValueFromPipeline=$true, Mandatory=$true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$Message,
-        [Parameter(Position=1)]
-        [string]$DialogType
-    )
-	
-	[System.Windows.Forms.MessageBox]::Show( $Message, 'ADDash', 'OK', $DialogType )
-}
-
-Function Get-AdminCredential {
-    Param(
-        [string]$AdminName
-    )
-
-	$AdminCredPath = 'J:\ADDash_cred.' + $ENV:COMPUTERNAME + '.txt'
-	$AdminPassword = ''
-	
-    If( Test-Path -Path $AdminCredPath ) {
-			$AdminPassword = Get-Content $AdminCredPath | ConvertTo-SecureString
-			$AdminCredential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList  $AdminName,$AdminPassword
-	} Else {
-	    $AdminCredential = Get-Credential -Message 'Please enter the administrative username and password to use.' -UserName $AdminName
-	    If( $AdminCredential.Password.Length -lt 1 ) {
-            Out-Dialog 'No administrative credential is available.' $DError
-		} Else {
-		    $AdminCredential.Password | ConvertFrom-SecureString | Out-File $AdminCredPath
-	    }
-    }
-
-	Return $AdminCredential
-}
-
-Function New-ADDForm {
-    Param(   
-        [int] $Width = $ADDWindowWidth, 
-        [int] $Height = $ADDWindowHeight,
-        [string] $Title
-    )
-
-    If( $Title.Length -lt 1 ) {
-        $Title = 'ADDash'
-    }
-
-    $ADDForm = New-Object System.Windows.Forms.Form
-
-    $ADDFlow = New-Object System.Windows.Forms.FlowLayoutPanel
-    #$ADDFlow.Anchor = `
-    #    [System.Windows.Forms.AnchorStyles]::Left + `
-    #    [System.Windows.Forms.AnchorStyles]::Right + `
-    #    [System.Windows.Forms.AnchorStyles]::Bottom + `
-    #    [System.Windows.Forms.AnchorStyles]::Top
-    $ADDFlow.Dock = [System.Windows.Forms.DockStyle]::Fill
-    $ADDFlow.Name = 'Layout'
-    $ADDForm.Controls.Add( $ADDFlow )
-
-	$ADDForm.Size = New-Object System.Drawing.Size( $Width, $Height )
-    $ADDForm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-    $ADDForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedSingle
-    $ADDForm.Text = $Title
-    $ADDForm.Icon = [Drawing.Icon]::ExtractAssociatedIcon( (Get-Command mmc).Path )
-    
-    Return $ADDForm
-}
-
-Function New-ADDFormControl {
-    Param(
-        [Parameter(Mandatory, Position=0)]
-        [ValidateNotNullOrEmpty()]
-        [System.Windows.Forms.Form] $Parent,
-        [Parameter(ValueFromPipeline=$true)]
-        [ValidateNotNullOrEmpty()]
-        [System.Windows.Forms.Control] $Control,
-        [string] $LabelText
-    )
-
-    # Fetch the layout from the parent form.
-    $ADDLayouts = $Parent.Controls.Find( 'Layout', $true )
-    If( $ADDLayouts -eq $null -or $ADDLayouts.Length -eq 0 ) {
-        Out-Dialog -Message 'Unable to find control root.' -DialogType 'Error'
-        Return
-    }
-    $ADDLayout = $ADDLayouts.Get( 0 )
-    
-        Out-Dialog $LabelText
-    
-    # Add a label if text was specified.
-    If( $LabelText -ne $null ) {
-        $ListLabel = New-Object System.Windows.Forms.Label
-        $ListLabel.Text = $LabelText
-        $ListLabel.Location = New-Object System.Drawing.Point( $x, $y )
-        $ListLabel.Size = New-Object System.Drawing.Size( $w, 15 )
-        #$y = $y + 15
-	    #$Parent.Controls.Add( $ListLabel )
-        $ADDLayout.Controls.Add( $ListLabel );
-    } else {
-        Out-Dialog $LabelText
-    }
-
-    $ADDLayout.Controls.Add( $Control );
-    
-    Return $Parent
-}
-
-$UserList_DrawItem = {
-    Param(   
-        [System.Object] $Sender,
-        [System.Windows.Forms.DrawItemEventArgs] $Event
-    )
-
-    [System.Windows.Forms.ListBox] $SenderListBox = $Sender
-    
-    # Suppose Sender type Listbox.
-    if( $SenderListBox.Items.Count -eq 0 ) {
-        return
-    }
-
-    if( $SenderListBox.SelectedIndex -ne $LastSelectedIndex ) {
-        $SenderListBox.Invalidate()
-        Set-Variable -Name LastSelectedIndex -Value $SenderListBox.SelectedIndex `
-            -Scope Global
-    }
-
-    # Suppose item type String.
-    $ItemLabel = $SenderListBox.Items[$Event.Index]
-    If( $SenderListBox.SelectedIndex -eq $Event.Index ) {
-        $Color = [System.Drawing.Color]::Cyan
-    } ElseIf ( $ItemLabel.Contains( '[Disabled]' ) ) { 
-        $Color = [System.Drawing.Color]::LightGray
-    } ElseIf ( $ItemLabel.Contains( '[Locked]' ) ) { 
-        $Color = [System.Drawing.Color]::Red
-    } Else {
-        $Color = [System.Drawing.Color]::White
-    }
-
-    try {
-        $Brush = New-Object System.Drawing.SolidBrush( $Color )
-        $Event.Graphics.FillRectangle( $Brush, $Event.Bounds )
-    } finally {
-        $Brush.Dispose()
-    }
-
-    $Event.Graphics.DrawString(
-        $ItemLabel,
-        $Event.Font,
-        [System.Drawing.SystemBrushes]::ControlText,
-        (New-Object System.Drawing.PointF( $Event.Bounds.X, $Event.Bounds.Y ))
-    )
-}
-
-Function Input-Changepass {
-    Param(
-        [Parameter(Mandatory, Position=0)]
-        [ValidateNotNullOrEmpty()]
-        [string] $UserName,
-        [System.Management.Automation.PSCredential] $AdminCredential
-    )
-	
-    $UserCredential = Get-Credential -Message 'Please enter the new password for this user.' -UserName $UserName
-	
-    $InputUserName = $UserCredential.UserName
-    $InputPassword = $UserCredential.Password
-    $Result = Invoke-OnDC $AdminCredential { 
-        $Error.Clear()
-        Try {
-            Set-ADAccountPassword -Reset -Identity $Using:InputUserName -NewPassword $Using:InputPassword
-            Return 0
-        } Catch {
-            Return $Error
-        }
-    }
-    If( $Result -eq 0 ) {
-        Out-Dialog 'The password reset was successful.' $DInfo
-    } Else {
-        Out-Dialog $Result $DError
-    }
-}
-
-Function Format-Button {
-    Param(
-        [Parameter(Mandatory, Position=0)]
-        [ValidateNotNullOrEmpty()]
-        [System.Windows.Forms.DialogResult] $DialogResult,
-        [int] $x = 10,
-        [int] $y = 10,
-        [int] $w = 80,
-        [int] $h = 60,
-        [bool] $LabelTest = $true,
-        [string] $Label,
-        [string] $LabelFalse
-    )
-
-    $ADDButton = New-Object System.Windows.Forms.Button
-	$ADDButton.Location = New-Object System.Drawing.Point( $x, $y )
-	$ADDButton.Size = New-Object System.Drawing.Size( $w, $h )
-    If( $LabelTest ) {
-	    $ADDButton.Text = $Label
-    } Else {
-        $ADDButton.Text = $LabelFalse
-    }
-	$ADDButton.DialogResult = $DialogResult
-	#$ADDForm.Controls.Add( $ADDShowDisabled )
-    
-    Return $ADDButton
-}
-
-Function Format-Checkbox {
-    Param(
-        [Parameter( Mandatory=$true, Position=0 )]
-        [string] $Label,
-        [int] $x = 10,
-        [int] $y = 10,
-        [int] $w = 190,
-        [int] $h = 15
-    )
-    $ADDCheck = New-Object System.Windows.Forms.Checkbox
-    $ADDCheck.Text = $Label
-    $ADDCheck.Location = New-Object System.Drawing.Point( $x, $y )
-    $ADDCheck.Size = New-Object System.Drawing.Size( $w, $h )
-
-    Return $ADDCheck
-}
-
-Function Format-ListBox {
-    Param(
-        [Parameter(ValueFromPipeline=$true)]
-        [Object[]] $ObjectList,
-        [int] $x = 10,
-        [int] $y = 10,
-        [int] $w = ($ADDWindowWidth - 30),
-        [int] $h = 200,
-        [bool] $DropDown = $false,
-        [bool] $ForceEnabled = $false
-    )
-
-    If( $DropDown -eq $false ) {
-	    $ListBox = New-Object System.Windows.Forms.ListBox
-
-	    $ListBox.Location = New-Object System.Drawing.Point( $x, $y )
-	    $ListBox.Size = New-Object System.Drawing.Size( $w, $h )
-        $ListBox.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
-        $ListBox.Add_DrawItem( $UserList_DrawItem )
-    } Else {
-	    $ListBox = New-Object System.Windows.Forms.ComboBox
-
-	    $ListBox.Location = New-Object System.Drawing.Point( $x, $y )
-	    $ListBox.Size = New-Object System.Drawing.Size( $w, $h )
-	    $ListBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-        #$ListBox.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
-        #$ListBox.Add_DrawItem( $UserList_DrawItem )
-    }
-
-    $i = 0
-    # If we don't assign to $null, the list items pollute the return stream.
-    $null = $ObjectList | ForEach-Object {
-        $i++
-        $ObjectName = $_.Name
-
-        If( -not $ForceEnabled -and -not $_.Enabled ) {
-            $ObjectName += " [Disabled]"
-        } ElseIf( $_.LockedOut ) {
-            $ObjectName += " [Locked]"
-        }
-
-		$ListBox.Items.Add( $ObjectName )
-
-        Write-Progress -Activity "Building Object List" -Status “Adding $ObjectName” `
-            -PercentComplete ($i / $ObjectList.Count * 100)
-	}
-
-    Write-Progress -Activity "Building Object List" -Completed $true
-    
-	#$Parent.Controls.Add( $ListBox )
-    #New-ADDFormControl -Parent $Parent -Control $ListBox
-
-    Return $ListBox
-}
+$MyDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Import-Module $MyDir\FormWrappers.ps1
 
 Function Invoke-OnDC {
     Param(
@@ -364,16 +73,20 @@ Function Applet-Users {
         Return
     }
 	$ADDList = Format-ListBox -ObjectList $ADDUsers | `
-        New-ADDFormControl -Parent $ADDForm
+        New-ADDFormControl -Parent $ADDForm -h 290 -w 300 -Anchor ( `
+            [System.Windows.Forms.AnchorStyles]::Left + `
+            [System.Windows.Forms.AnchorStyles]::Right + `
+            [System.Windows.Forms.AnchorStyles]::Top + `
+            [System.Windows.Forms.AnchorStyles]::Bottom)
 
     Format-Button -DialogResult OK -Label 'Hide Disabled' -LabelFalse 'Show Disabled' -LabelTest $ShowDisabled | `
-        New-ADDFormControl -Parent $ADDForm
+        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
 
     Format-Button -DialogResult Retry -Label 'Set Password' | `
-        New-ADDFormControl -Parent $ADDForm
+        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
 
     Format-Button -DialogResult Ignore -Label 'Unlock Account' | `
-        New-ADDFormControl -Parent $ADDForm
+        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
 
 	$ADDResult = $ADDForm.ShowDialog()
 
@@ -425,8 +138,8 @@ Function Applet-NewUser {
         #Return
     }
     $ADDTitleGroups = $ADDTitleGroupsD + $ADDTitleGroupsS
-	Format-ListBox -ForceEnabled $true -DropDown $true -ObjectList $ADDTitleGroups | `
-        New-ADDFormControl -Parent $ADDForm -LabelText 'Title Group'
+	$ADDTitleList = Format-ListBox -ForceEnabled $true -DropDown $true -ObjectList $ADDTitleGroups
+    New-ADDFormControl -Parent $ADDForm -LabelText 'Title Group' -Control $ADDTitleList
 
     # Department Groups List
     $ADDDeptGroups = Get-RemoteADObject -OU 'OU=Departments,OU=Security,OU=Groups,OU=Albany,DC=domain,DC=local' `
@@ -435,8 +148,8 @@ Function Applet-NewUser {
         Out-Dialog -Message 'Departments security list is empty.' -DialogType 'Error'
         #Return
     }
-	Format-ListBox -ForceEnabled $true -DropDown $true -ObjectList $ADDDeptGroups  | `
-        New-ADDFormControl -Parent $ADDForm -LabelText 'Department Group'
+	$ADDDeptList = Format-ListBox -ForceEnabled $true -DropDown $true -ObjectList $ADDDeptGroups
+    New-ADDFormControl -Parent $ADDForm -LabelText 'Department Group' -Control $ADDDeptList
 
     $ADDAccountantGroup = Format-Checkbox 'Accountants Group'
     New-ADDFormControl -Parent $ADDForm -Control $ADDAccountantGroup
@@ -481,8 +194,9 @@ Function Applet-Computers {
     }
 
     Format-Button -DialogResult OK -Label 'Hide Disabled' -LabelFalse 'Show Disabled' -LabelTest $ShowDisabled | `
-        New-ADDFormControl -Parent $ADDForm
-    Format-Button -DialogResult Ignore -Label 'Bitlocker Key' | New-ADDFormControl -Parent $ADDForm
+        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+    Format-Button -DialogResult Ignore -Label 'Bitlocker Key' | `
+        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
 
 	$ADDResult = $ADDForm.ShowDialog()
 
@@ -515,20 +229,23 @@ Function Applet-Choose {
 	# Build the form.
 
 	$ADDForm = New-ADDForm -Height 170
-    Format-Button -DialogResult Retry -Label 'Users' | New-ADDFormControl -Parent $ADDForm
-    Format-Button -DialogResult Ignore -Label 'Computers' | New-ADDFormControl -Parent $ADDForm
-    Format-Button -DialogResult No -Label 'New User' | New-ADDFormControl -Parent $ADDForm
+    $null = Format-Button -DialogResult Retry -Label 'Users' | `
+        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+    $null = Format-Button -DialogResult Ignore -Label 'Computers' | `
+        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+    $null = Format-Button -DialogResult No -Label 'New User' | `
+        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
     $ADDResult = $ADDForm.ShowDialog()
 
 	If( $ADDResult -eq [System.Windows.Forms.DialogResult]::Retry ) {
 		# Users.
-        Applet-Users -AdminCredential $AdminCredential
+        $null = Applet-Users -AdminCredential $AdminCredential
 	} ElseIf( $ADDResult -eq [System.Windows.Forms.DialogResult]::No ) {
 		# New User.
-        Applet-NewUser -AdminCredential $AdminCredential
+        $null = Applet-NewUser -AdminCredential $AdminCredential
 	} ElseIf( $ADDResult -eq [System.Windows.Forms.DialogResult]::Ignore ) {
 		# Computers.
-        Applet-Computers -AdminCredential $AdminCredential -ShowDisabled $false
+        $null = Applet-Computers -AdminCredential $AdminCredential -ShowDisabled $false
     }
 }
 
