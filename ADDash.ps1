@@ -94,9 +94,10 @@ Function New-ADDFormControl {
         [Parameter(ValueFromPipeline=$true)]
         [ValidateNotNullOrEmpty()]
         [System.Windows.Forms.Control] $Control,
-        [string] $LabelText = $null
+        [string] $LabelText
     )
 
+    # Fetch the layout from the parent form.
     $ADDLayouts = $Parent.Controls.Find( 'Layout', $true )
     If( $ADDLayouts -eq $null -or $ADDLayouts.Length -eq 0 ) {
         Out-Dialog -Message 'Unable to find control root.' -DialogType 'Error'
@@ -104,14 +105,19 @@ Function New-ADDFormControl {
     }
     $ADDLayout = $ADDLayouts.Get( 0 )
     
+        Out-Dialog $LabelText
+    
+    # Add a label if text was specified.
     If( $LabelText -ne $null ) {
         $ListLabel = New-Object System.Windows.Forms.Label
         $ListLabel.Text = $LabelText
         $ListLabel.Location = New-Object System.Drawing.Point( $x, $y )
         $ListLabel.Size = New-Object System.Drawing.Size( $w, 15 )
-        $y = $y + 15
+        #$y = $y + 15
 	    #$Parent.Controls.Add( $ListLabel )
         $ADDLayout.Controls.Add( $ListLabel );
+    } else {
+        Out-Dialog $LabelText
     }
 
     $ADDLayout.Controls.Add( $Control );
@@ -219,6 +225,23 @@ Function Format-Button {
 	#$ADDForm.Controls.Add( $ADDShowDisabled )
     
     Return $ADDButton
+}
+
+Function Format-Checkbox {
+    Param(
+        [Parameter( Mandatory=$true, Position=0 )]
+        [string] $Label,
+        [int] $x = 10,
+        [int] $y = 10,
+        [int] $w = 190,
+        [int] $h = 15
+    )
+    $ADDCheck = New-Object System.Windows.Forms.Checkbox
+    $ADDCheck.Text = $Label
+    $ADDCheck.Location = New-Object System.Drawing.Point( $x, $y )
+    $ADDCheck.Size = New-Object System.Drawing.Size( $w, $h )
+
+    Return $ADDCheck
 }
 
 Function Format-ListBox {
@@ -336,13 +359,14 @@ Function Applet-Users {
     $Error.Clear()
     $ADDUsers = Get-RemoteADObject -OU 'OU=Users,OU=Albany,DC=domain,DC=local' `
         -ObjectType 'User' -Filter $UsersFilter -AdminCredential $AdminCredential
-    If( $ADDUsers -eq $null ) {
+    If( $ADDUsers -eq $null -or $ADDUsers.Length -eq 0 ) {
         Out-Dialog -Message $Error -DialogType 'Error'
         Return
     }
-	,$ADDUsers | Format-ListBox
+	$ADDList = Format-ListBox -ObjectList $ADDUsers | `
+        New-ADDFormControl -Parent $ADDForm
 
-    Format-Button -DialogResult -Label 'Hide Disabled' -LabelFalse 'Show Disabled' | `
+    Format-Button -DialogResult OK -Label 'Hide Disabled' -LabelFalse 'Show Disabled' -LabelTest $ShowDisabled | `
         New-ADDFormControl -Parent $ADDForm
 
     Format-Button -DialogResult Retry -Label 'Set Password' | `
@@ -401,7 +425,8 @@ Function Applet-NewUser {
         #Return
     }
     $ADDTitleGroups = $ADDTitleGroupsD + $ADDTitleGroupsS
-	,$ADDTitleGroups | Format-ListBox -Parent $ADDForm -ForceEnabled $true -DropDown $true -LabelText "Title Group"
+	Format-ListBox -ForceEnabled $true -DropDown $true -ObjectList $ADDTitleGroups | `
+        New-ADDFormControl -Parent $ADDForm -LabelText 'Title Group'
 
     # Department Groups List
     $ADDDeptGroups = Get-RemoteADObject -OU 'OU=Departments,OU=Security,OU=Groups,OU=Albany,DC=domain,DC=local' `
@@ -410,31 +435,20 @@ Function Applet-NewUser {
         Out-Dialog -Message 'Departments security list is empty.' -DialogType 'Error'
         #Return
     }
-	,$ADDDeptGroups | Format-ListBox -Parent $ADDForm -ForceEnabled $true -DropDown $true -LabelText "Department Group" -y 50
+	Format-ListBox -ForceEnabled $true -DropDown $true -ObjectList $ADDDeptGroups  | `
+        New-ADDFormControl -Parent $ADDForm -LabelText 'Department Group'
 
-    $ADDAccountantGroup = New-Object System.Windows.Forms.Checkbox
-    $ADDAccountantGroup.Text = 'Accountants Group'
-    $ADDAccountantGroup.Location = New-Object System.Drawing.Point( 10, 100 )
-    $ADDAccountantGroup.Size = New-Object System.Drawing.Size( 190, 15 )
-    $ADDForm.Controls.Add( $ADDAccountantGroup )
+    $ADDAccountantGroup = Format-Checkbox 'Accountants Group'
+    New-ADDFormControl -Parent $ADDForm -Control $ADDAccountantGroup
     
-    $ADDDuoGroup = New-Object System.Windows.Forms.Checkbox
-    $ADDDuoGroup.Text = 'Duo Group'
-    $ADDDuoGroup.Location = New-Object System.Drawing.Point( 10, 120 )
-    $ADDDuoGroup.Size = New-Object System.Drawing.Size( 190, 15 )
-    $ADDForm.Controls.Add( $ADDDuoGroup )
+    $ADDDuoGroup = Format-Checkbox 'Citrix Duo Group'
+    New-ADDFormControl -Parent $ADDForm -Control $ADDDuoGroup
     
-    $ADDNativePrinterGroup = New-Object System.Windows.Forms.Checkbox
-    $ADDNativePrinterGroup.Text = 'Native Printer Group'
-    $ADDNativePrinterGroup.Location = New-Object System.Drawing.Point( 10, 140 )
-    $ADDNativePrinterGroup.Size = New-Object System.Drawing.Size( 190, 15 )
-    $ADDForm.Controls.Add( $ADDNativePrinterGroup )
+    $ADDNativePrinterGroup = Format-Checkbox 'Citrix Native Printer Group'
+    New-ADDFormControl -Parent $ADDForm -Control $ADDNativePrinterGroup
     
-    $ADDWomenGroup = New-Object System.Windows.Forms.Checkbox
-    $ADDWomenGroup.Text = 'Women Group'
-    $ADDWomenGroup.Location = New-Object System.Drawing.Point( 10, 160 )
-    $ADDWomenGroup.Size = New-Object System.Drawing.Size( 190, 15 )
-    $ADDForm.Controls.Add( $ADDWomenGroup )
+    $ADDWomenGroup = Format-Checkbox 'Women Group'
+    New-ADDFormControl -Parent $ADDForm -Control $ADDWomenGroup
 
 	$ADDResult = $ADDForm.ShowDialog()
 
@@ -455,6 +469,7 @@ Function Applet-Computers {
 
 	$ADDForm = New-ADDForm -Title 'AD Computers'
     
+    # Grab the list of computers from the DC.
     $Error.Clear()
     $ADDComputers = Get-RemoteADObject -OU 'OU=Computers,OU=Albany,DC=domain,DC=local' `
         -ObjectType 'Computer' -Filter $ComputersFilter -AdminCredential $AdminCredential
