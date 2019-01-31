@@ -8,6 +8,9 @@ Add-Type -AssemblyName System.Drawing
 Set-Variable DInfo -Option Constant -Value 'Information'
 Set-Variable DError -Option Constant -Value 'Error'
 
+$AddWindowWidth = 290
+$AddWindowHeight = 320
+
 $LastSelectedIndex = 0
 
 Function Out-Dialog {
@@ -47,8 +50,8 @@ Function Get-AdminCredential {
 
 Function New-ADDForm {
     Param(   
-        [int] $Width, 
-        [int] $Height,
+        [int] $Width = $ADDWindowWidth, 
+        [int] $Height = $ADDWindowHeight,
         [string] $Title
     )
 
@@ -145,15 +148,48 @@ Function Format-ListBox {
     Param(
         [Parameter(ValueFromPipeline=$true)]
         [Object[]] $ObjectList,
-        [System.Windows.Forms.ListBox] $ListBox
+        [System.Windows.Forms.Form]$Parent,
+        [int] $x = 10,
+        [int] $y = 10,
+        [int] $w = ($ADDWindowWidth - 30),
+        [int] $h = 200,
+        [bool] $DropDown = $false,
+        [bool] $ForceEnabled = $false,
+        [string] $LabelText = $null
     )
+
+    If( $LabelText -ne $null ) {
+        $ListLabel = New-Object System.Windows.Forms.Label
+        $ListLabel.Text = $LabelText
+        $ListLabel.Location = New-Object System.Drawing.Point( $x, $y )
+        $ListLabel.Size = New-Object System.Drawing.Size( $w, 15 )
+        $y = $y + 15
+	    $Parent.Controls.Add( $ListLabel )
+    }
+
+    If( $DropDown -eq $false ) {
+	    $ListBox = New-Object System.Windows.Forms.ListBox
+
+	    $ListBox.Location = New-Object System.Drawing.Point( $x, $y )
+	    $ListBox.Size = New-Object System.Drawing.Size( $w, $h )
+        $ListBox.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
+        $ListBox.Add_DrawItem( $UserList_DrawItem )
+    } Else {
+	    $ListBox = New-Object System.Windows.Forms.ComboBox
+
+	    $ListBox.Location = New-Object System.Drawing.Point( $x, $y )
+	    $ListBox.Size = New-Object System.Drawing.Size( $w, $h )
+	    $ListBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+        #$ListBox.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
+        #$ListBox.Add_DrawItem( $UserList_DrawItem )
+    }
 
     $i = 0
     $ObjectList | ForEach-Object {
         $i++
         $ObjectName = $_.Name
 
-        If( -not $_.Enabled ) {
+        If( -not $ForceEnabled -and -not $_.Enabled ) {
             $ObjectName += " [Disabled]"
         } ElseIf( $_.LockedOut ) {
             $ObjectName += " [Locked]"
@@ -166,6 +202,10 @@ Function Format-ListBox {
 	}
 
     Write-Progress -Activity "Building Object List" -Completed $true
+    
+	$Parent.Controls.Add( $ListBox )
+
+    #Return $ListBox
 }
 
 Function Invoke-OnDC {
@@ -199,6 +239,9 @@ Function Get-RemoteADObject {
     } ElseIf( $ObjectType -eq 'Computer' ) {
 	    $ADDObjects = Invoke-OnDC $AdminCredential { Get-ADComputer -SearchBase $Using:OU -Filter $Using:Filter -Properties $Using:Properties } | 
             Sort-Object -Property Name
+    } ElseIf( $ObjectType -eq 'Group' ) {
+	    $ADDObjects = Invoke-OnDC $AdminCredential { Get-ADGroup -SearchBase $Using:OU -Filter $Using:Filter } |
+            Sort-Object -Property Name
     }
 
     Return ,$ADDObjects
@@ -217,13 +260,8 @@ Function Applet-Users {
 
 	# Build the form.
 
-	$ADDForm = New-ADDForm -Width 290 -Height 320 -Title 'AD Users'
+	$ADDForm = New-ADDForm -Title 'AD Users'
 	
-	$ADDList = New-Object System.Windows.Forms.ListBox
-	$ADDList.Location = New-Object System.Drawing.Point( 10, 10 )
-	$ADDList.Size = New-Object System.Drawing.Size( 260, 200 )
-    $ADDList.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
-    $ADDList.Add_DrawItem( $UserList_DrawItem )
 	#$ADDUsers = Get-ADObject -SearchBase 'OU=Users,OU=Albany,DC=domain,DC=local' `
     #    -Filter $UsersFilter -Properties DistinguishedName,Enabled,Name,SamAccountName,SID,LockedOut | 
     #    Sort-Object -Property Name
@@ -234,8 +272,7 @@ Function Applet-Users {
         Out-Dialog -Message $Error -DialogType 'Error'
         Return
     }
-	,$ADDUsers | Format-ListBox -ListBox $ADDList
-	$ADDForm.Controls.Add( $ADDList )
+	,$ADDUsers | Format-ListBox -Parent $ADDForm
 
     $ADDShowDisabled = New-Object System.Windows.Forms.Button
 	$ADDShowDisabled.Location = New-Object System.Drawing.Point( 10, 220 )
@@ -288,6 +325,69 @@ Function Applet-Users {
     }
 }
 
+Function Applet-NewUser {
+    Param(
+        [System.Management.Automation.PSCredential] $AdminCredential
+    )
+    
+	$ADDForm = New-ADDForm -Title 'New AD User'
+
+    $Error.Clear()
+
+    # Title Groups List
+    $ADDTitleGroupsD = Get-RemoteADObject -OU 'OU=Titles,OU=Distribution,OU=Groups,OU=Albany,DC=domain,DC=local' `
+        -ObjectType 'Group' -Filter '*' -AdminCredential $AdminCredential
+    If( $ADDTitleGroupsD -eq $null ) {
+        Out-Dialog -Message 'Titles distribution list is empty.' -DialogType 'Error'
+        #Return
+    }
+    $ADDTitleGroupMiddle = $ADDTitleGroupsD.Length
+    $ADDTitleGroupsS = Get-RemoteADObject -OU 'OU=Titles,OU=Security,OU=Groups,OU=Albany,DC=domain,DC=local' `
+        -ObjectType 'Group' -Filter '*' -AdminCredential $AdminCredential
+    If( $ADDTitleGroupsS -eq $null ) {
+        Out-Dialog -Message 'Titles security list is empty.' -DialogType 'Error'
+        #Return
+    }
+    $ADDTitleGroups = $ADDTitleGroupsD + $ADDTitleGroupsS
+	,$ADDTitleGroups | Format-ListBox -Parent $ADDForm -ForceEnabled $true -DropDown $true -LabelText "Title Group"
+
+    # Department Groups List
+    $ADDDeptGroups = Get-RemoteADObject -OU 'OU=Departments,OU=Security,OU=Groups,OU=Albany,DC=domain,DC=local' `
+        -ObjectType 'Group' -Filter '*' -AdminCredential $AdminCredential
+    If( $ADDDeptGroups -eq $null ) {
+        Out-Dialog -Message 'Departments security list is empty.' -DialogType 'Error'
+        #Return
+    }
+	,$ADDDeptGroups | Format-ListBox -Parent $ADDForm -ForceEnabled $true -DropDown $true -LabelText "Department Group" -y 50
+
+    $ADDAccountantGroup = New-Object System.Windows.Forms.Checkbox
+    $ADDAccountantGroup.Text = 'Accountants Group'
+    $ADDAccountantGroup.Location = New-Object System.Drawing.Point( 10, 100 )
+    $ADDAccountantGroup.Size = New-Object System.Drawing.Size( 190, 15 )
+    $ADDForm.Controls.Add( $ADDAccountantGroup )
+    
+    $ADDDuoGroup = New-Object System.Windows.Forms.Checkbox
+    $ADDDuoGroup.Text = 'Duo Group'
+    $ADDDuoGroup.Location = New-Object System.Drawing.Point( 10, 120 )
+    $ADDDuoGroup.Size = New-Object System.Drawing.Size( 190, 15 )
+    $ADDForm.Controls.Add( $ADDDuoGroup )
+    
+    $ADDNativePrinterGroup = New-Object System.Windows.Forms.Checkbox
+    $ADDNativePrinterGroup.Text = 'Native Printer Group'
+    $ADDNativePrinterGroup.Location = New-Object System.Drawing.Point( 10, 140 )
+    $ADDNativePrinterGroup.Size = New-Object System.Drawing.Size( 190, 15 )
+    $ADDForm.Controls.Add( $ADDNativePrinterGroup )
+    
+    $ADDWomenGroup = New-Object System.Windows.Forms.Checkbox
+    $ADDWomenGroup.Text = 'Women Group'
+    $ADDWomenGroup.Location = New-Object System.Drawing.Point( 10, 160 )
+    $ADDWomenGroup.Size = New-Object System.Drawing.Size( 190, 15 )
+    $ADDForm.Controls.Add( $ADDWomenGroup )
+
+	$ADDResult = $ADDForm.ShowDialog()
+
+}
+
 Function Applet-Computers {
     Param(
         [System.Management.Automation.PSCredential] $AdminCredential,
@@ -301,22 +401,16 @@ Function Applet-Computers {
 
 	# Build the form.
 
-	$ADDForm = New-ADDForm -Width 290 -Height 320 -Title 'AD Computers'
+	$ADDForm = New-ADDForm -Title 'AD Computers'
     
-    $ADDList = New-Object System.Windows.Forms.ListBox
-	$ADDList.Location = New-Object System.Drawing.Point( 10, 10 )
-	$ADDList.Size = New-Object System.Drawing.Size( 260, 200 )
-    $ADDList.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
-    $ADDList.Add_DrawItem( $UserList_DrawItem )
     $Error.Clear()
     $ADDComputers = Get-RemoteADObject -OU 'OU=Computers,OU=Albany,DC=domain,DC=local' `
         -ObjectType 'Computer' -Filter $ComputersFilter -AdminCredential $AdminCredential
-    ,$ADDComputers | Format-ListBox -ListBox $ADDList
+    ,$ADDComputers | Format-ListBox -Parent $ADDForm
     If( $ADDComputers -eq $null ) {
         Out-Dialog -Message $Error -DialogType 'Error'
         Return
     }
-	$ADDForm.Controls.Add( $ADDList )
 
     $ADDShowDisabled = New-Object System.Windows.Forms.Button
 	$ADDShowDisabled.Location = New-Object System.Drawing.Point( 10, 220 )
@@ -366,14 +460,20 @@ Function Applet-Choose {
 
 	# Build the form.
 
-	$ADDForm = New-ADDForm -Width 290 -Height 110
+	$ADDForm = New-ADDForm -Height 170
     
+    # oxx
+    # xxx
+
 	$ADDUsers = New-Object System.Windows.Forms.Button
 	$ADDUsers.Location = New-Object System.Drawing.Point( 10, 10 )
 	$ADDUsers.Size = New-Object System.Drawing.Size( 80, 60 )
 	$ADDUsers.Text = 'Users'
 	$ADDUsers.DialogResult = [System.Windows.Forms.DialogResult]::Retry
 	$ADDForm.Controls.Add( $ADDUsers )
+
+    # xox
+    # xxx
 
 	$ADDComputers = New-Object System.Windows.Forms.Button
 	$ADDComputers.Location = New-Object System.Drawing.Point( 100, 10 )
@@ -382,11 +482,24 @@ Function Applet-Choose {
 	$ADDComputers.DialogResult = [System.Windows.Forms.DialogResult]::Ignore
 	$ADDForm.Controls.Add( $ADDComputers )
 
+    # xxx
+    # oxx
+
+	$ADDNewUser = New-Object System.Windows.Forms.Button
+	$ADDNewUser.Location = New-Object System.Drawing.Point( 10, 70 )
+	$ADDNewUser.Size = New-Object System.Drawing.Size( 80, 60 )
+	$ADDNewUser.Text = 'New User'
+	$ADDNewUser.DialogResult = [System.Windows.Forms.DialogResult]::No
+	$ADDForm.Controls.Add( $ADDNewUser )
+
     $ADDResult = $ADDForm.ShowDialog()
 
 	If( $ADDResult -eq [System.Windows.Forms.DialogResult]::Retry ) {
 		# Users.
         Applet-Users -AdminCredential $AdminCredential
+	} ElseIf( $ADDResult -eq [System.Windows.Forms.DialogResult]::No ) {
+		# New User.
+        Applet-NewUser -AdminCredential $AdminCredential
 	} ElseIf( $ADDResult -eq [System.Windows.Forms.DialogResult]::Ignore ) {
 		# Computers.
         Applet-Computers -AdminCredential $AdminCredential -ShowDisabled $false
