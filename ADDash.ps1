@@ -15,8 +15,10 @@ Function Invoke-OnDC {
         [Parameter( Mandatory=$true, Position=1 )]
         [scriptblock] $ScriptBlock
     )
+    
+    $DomainController = Get-Registry -Hive HKCU -Path 'Software\ADDash' -Name 'DomainController'
 
-    Return $(Invoke-Command -Credential $AdminCredential -ComputerName "dc01" `
+    Return $(Invoke-Command -Credential $AdminCredential -ComputerName $DomainController `
         -ScriptBlock $ScriptBlock)
 }
 
@@ -45,6 +47,42 @@ Function Get-RemoteADObject {
     }
 
     Return ,$ADDObjects
+}
+
+Function Applet-Options {
+    Param(
+        [System.Management.Automation.PSCredential] $AdminCredential
+    )
+
+    $DomainController = Get-Registry -Hive HKCU -Path 'Software\ADDash' -Name 'DomainController'
+    $SavePasswords = Get-Registry -Hive HKCU -Path 'Software\ADDash' -Name 'SavePasswords'
+
+	$ADDForm = New-ADDForm -Title 'ADDash Options'
+
+    $DomainControllerText = Format-TextBox -Name 'DomainController' -Value $DomainController
+    New-ADDFormControl -Parent $ADDForm -Layout 'MainLayout' -LabelText 'Domain Controller' -Control $DomainControllerText
+
+    $SavePasswordsCheck = Format-Checkbox -Name 'SavePasswords' -Value $SavePasswords -Label 'Save Passwords'
+    New-ADDFormControl -Parent $ADDForm -Layout 'MainLayout' -Control $SavePasswordsCheck
+
+    Format-Button -DialogResult OK -Label 'Save' | `
+        New-ADDFormControl -Parent $ADDForm -Layout 'MainLayout'
+        
+	$ADDResult = $ADDForm.ShowDialog()
+
+    If( $ADDResult -eq [System.Windows.Forms.DialogResult]::OK ) {
+
+        If( $SavePasswordsCheck.CheckState -eq [System.Windows.Forms.CheckState]::Checked ) {
+            Set-Registry -Hive HKCU -Path 'Software\ADDash' -Name 'SavePasswords' -Value 'True'
+        } Else {
+            Set-Registry -Hive HKCU -Path 'Software\ADDash' -Name 'SavePasswords' -Value 'False'
+        }
+        Set-Registry -Hive HKCU -Path 'Software\ADDash' -Name 'DomainController' -Value $DomainControllerText.Text
+
+        Applet-Options -AdminCredential $AdminCredential
+    } Else {
+        Applet-Choose -AdminCredential $AdminCredential
+    }
 }
 
 Function Applet-Users {
@@ -150,20 +188,29 @@ Function Applet-NewUser {
 	$ADDDeptList = Format-ListBox -ForceEnabled $true -DropDown $true -ObjectList $ADDDeptGroups
     New-ADDFormControl -Parent $ADDForm -LabelText 'Department Group' -Control $ADDDeptList -Layout 'MainLayout'
 
-    $ADDAccountantGroup = Format-Checkbox 'Accountants Group'
+    $ADDAccountantGroup = Format-Checkbox -Name 'AccountantsGroup' -Label 'Accountants Group'
     New-ADDFormControl -Parent $ADDForm -Control $ADDAccountantGroup -Layout 'MainLayout'
     
-    $ADDDuoGroup = Format-Checkbox 'Citrix Duo Group'
+    $ADDDuoGroup = Format-Checkbox -Name 'CitrixDuoGroup' -Label 'Citrix Duo Group'
     New-ADDFormControl -Parent $ADDForm -Control $ADDDuoGroup -Layout 'MainLayout'
     
-    $ADDNativePrinterGroup = Format-Checkbox 'Citrix Native Printer Group'
+    $ADDNativePrinterGroup = Format-Checkbox -Name 'CitrixNativePrinterGroup' -Label 'Citrix Native Printer Group'
     New-ADDFormControl -Parent $ADDForm -Control $ADDNativePrinterGroup -Layout 'MainLayout'
     
-    $ADDWomenGroup = Format-Checkbox 'Women Group'
+    $ADDWomenGroup = Format-Checkbox -Name 'WomenGroup' -Label 'Women Group'
     New-ADDFormControl -Parent $ADDForm -Control $ADDWomenGroup -Layout 'MainLayout'
+    
+    New-ADDFormPanel -Columns 2 -Name 'ButtonsLayout' | `
+        New-ADDFormControl -Parent $ADDForm -Layout 'MainLayout'
+    $null = Format-Button -DialogResult Cancel -Label 'Cancel' | `
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'ButtonsLayout'
+    $null = Format-Button -DialogResult OK -Label 'Create' | `
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'ButtonsLayout'
 
 	$ADDResult = $ADDForm.ShowDialog()
 
+    #Applet-NewUser -AdminCredential $AdminCredential
+    Applet-Choose -AdminCredential $AdminCredential
 }
 
 Function Applet-Computers {
@@ -232,11 +279,13 @@ Function Applet-Choose {
 	$ADDForm = New-ADDForm -Height 170 -Columns 3
 
     $null = Format-Button -DialogResult Retry -Label 'Users' | `
-        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 33
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 25
     $null = Format-Button -DialogResult Ignore -Label 'Computers' | `
-        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 33
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 25
     $null = Format-Button -DialogResult No -Label 'New User' | `
-        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 33
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 25
+    $null = Format-Button -DialogResult Yes -Label 'Options' | `
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 25
     $ADDResult = $ADDForm.ShowDialog()
 
 	If( $ADDResult -eq [System.Windows.Forms.DialogResult]::Retry ) {
@@ -248,9 +297,12 @@ Function Applet-Choose {
 	} ElseIf( $ADDResult -eq [System.Windows.Forms.DialogResult]::Ignore ) {
 		# Computers.
         $null = Applet-Computers -AdminCredential $AdminCredential -ShowDisabled $false
+	} ElseIf( $ADDResult -eq [System.Windows.Forms.DialogResult]::Yes ) {
+		# Options.
+        $null = Applet-Options -AdminCredential $AdminCredential
     }
 }
 
-$AdminCredential = Get-AdminCredential -AdminName 'domain\administrator'
+$AdminCredential = Get-AdminCredential -AdminName 'domain\administrator' -SavePasswords $True -RegistryPath 'Software\ADDash'
 
 Applet-Choose -AdminCredential $AdminCredential

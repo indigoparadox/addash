@@ -3,6 +3,21 @@
 # A simple wrapper around Windows Forms with some common utilities thrown in.
 #
 
+Add-Type -TypeDefinition @"
+    public enum RegistryHive {
+        HKCU,
+        HKLM,
+        HKCR
+    }
+"@
+
+Add-Type -TypeDefinition @"
+    public enum RegistryType {
+        String,
+        DWord
+    }
+"@
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -12,6 +27,60 @@ Set-Variable AddWindowWidth -Option Constant -Value 290
 Set-Variable AddWindowHeight -Option Constant -Value 320
 Set-Variable AddWindowMargin -Option Constant -Value 10
 Set-Variable ADDControlDefaultSingleLineHeight -Option Constant -Value 15
+
+Function Get-Registry {
+    Param(
+        [ValidateNotNullOrEmpty()]
+        [RegistryHive] $Hive,
+        [ValidateNotNullOrEmpty()]
+        [string] $Path,
+        [ValidateNotNullOrEmpty()]
+        [string] $Name
+    )
+    
+    $PathBuilder = New-Object -TypeName System.Text.StringBuilder
+    [void]$PathBuilder.Append( $Hive )
+    [void]$PathBuilder.Append( ':\' )
+    [void]$PathBuilder.Append( $Path )
+
+    $Out = Get-ItemProperty -Path ($PathBuilder.ToString()) -Name $Name -ErrorAction SilentlyContinue
+
+    Return $Out.$Name
+}
+
+Function Set-Registry {
+    Param(
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [RegistryHive] $Hive,
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string] $Path,
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string] $Name,
+        [RegistryType] $Type = [RegistryType]::String,
+        [Parameter(ValueFromPipeline=$true)]
+        [string] $Value
+    )
+    
+    $PathBuilder = New-Object -TypeName System.Text.StringBuilder
+    [void]$PathBuilder.Append( $Hive )
+    [void]$PathBuilder.Append( ':\' )
+    [void]$PathBuilder.Append( $Path )
+    $FullPath = $PathBuilder.ToString()
+    
+    $Test = Get-Item -Path $FullPath -ErrorAction SilentlyContinue
+    If( $Test -eq $null ) {
+        [void](New-Item -Path $FullPath)
+    }
+    
+    $Test = Get-ItemProperty -Path $FullPath -ErrorAction SilentlyContinue
+    If( $Test -ne $null ) {
+        Remove-ItemProperty -Path $FullPath -Name $Name
+    }
+    [void](New-ItemProperty -Path $FullPath -Name $Name -Value $Value -PropertyType $Type)
+}
 
 Function Out-Dialog {
     Param(
@@ -27,24 +96,41 @@ Function Out-Dialog {
 
 Function Get-AdminCredential {
     Param(
-        [string]$AdminName
+        [string]$AdminName,
+        [string]$RegistryPath = '',
+        [string]$RegistryKey = 'SavePW' + $ENV:COMPUTERNAME,
+        [string]$AdminCredPath = 'J:\ADDash_cred.' + $ENV:COMPUTERNAME + '.txt',
+        [bool]$SavePasswords = $false
     )
 
-	$AdminCredPath = 'J:\ADDash_cred.' + $ENV:COMPUTERNAME + '.txt'
 	$AdminPassword = ''
+    $AdminCredential = $null
 	
-    If( Test-Path -Path $AdminCredPath ) {
-			$AdminPassword = Get-Content $AdminCredPath | ConvertTo-SecureString
-			$AdminCredential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList  $AdminName,$AdminPassword
-	} Else {
+    If( $RegistryPath -ne '' -and $SavePasswords ) {
+        $AdminPassword = Get-Registry -Hive HKCU -Path $RegistryPath -Name $RegistryKey | ConvertTo-SecureString
+        $AdminCredential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList  $AdminName,$AdminPassword
+    }
+    
+    If( $AdminCredential -eq $null -and (Test-Path -Path $AdminCredPath) -and $SavePasswords ) {
+		$AdminPassword = Get-Content $AdminCredPath | ConvertTo-SecureString
+		$AdminCredential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList  $AdminName,$AdminPassword
+	}
+
+    # Wasn't able to find the password anywhere else or password saving disabled.
+    If( $AdminCredential -eq $null ) {
 	    $AdminCredential = Get-Credential -Message 'Please enter the administrative username and password to use.' -UserName $AdminName
 	    If( $AdminCredential.Password.Length -lt 1 ) {
             Out-Dialog 'No administrative credential is available.' $DError
 		} Else {
-		    $AdminCredential.Password | ConvertFrom-SecureString | Out-File $AdminCredPath
+            If( $RegistryPath -eq '' -and $SavePasswords ) {
+		        $AdminCredential.Password | ConvertFrom-SecureString | Out-File $AdminCredPath
+            } ElseIf( $SavePasswords ) {
+		        $AdminCredential.Password | ConvertFrom-SecureString | `
+                    Set-Registry -Hive HKCU -Path $RegistryPath -Name $RegistryKey
+            }
 	    }
     }
-
+    
 	Return $AdminCredential
 }
 
@@ -60,7 +146,7 @@ Function New-ADDForm {
     $ADDForm = New-Object System.Windows.Forms.Form
 
     $ADDPanel = New-ADDFormPanel -Name 'MainLayout' -Columns $Columns -Rows $Rows
-    $null = $ADDForm.Controls.Add( $ADDPanel )
+    [void]$ADDForm.Controls.Add( $ADDPanel )
 
 	$ADDForm.Size = New-Object System.Drawing.Size( $Width, $Height )
     $ADDForm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -89,7 +175,7 @@ Function New-ADDFormPanel {
 
     $ADDColumn = New-Object System.Windows.Forms.ColumnStyle( [System.Windows.Forms.SizeType]::Percent, $Division )
 
-    $null = $ADDPanel.ColumnStyles.Add( $ADDColumn )
+    [void]$ADDPanel.ColumnStyles.Add( $ADDColumn )
 
     Return $ADDPanel
 }
@@ -128,16 +214,16 @@ Function New-ADDFormControl {
 
         If( $Horizontal ) {
             $LabelColumn = New-Object System.Windows.Forms.ColumnStyle( [System.Windows.Forms.SizeType]::Percent, $ColumnDivision )
-            $null = $ADDLayout.ColumnStyles.Add( $LabelColumn )
+            [void]$ADDLayout.ColumnStyles.Add( $LabelColumn )
         }
         $ListLabelRow = New-Object System.Windows.Forms.RowStyle( [System.Windows.Forms.SizeType]::Percent, $RowDivision )
         $ADDLayout.RowStyles.Add( $ListLabelRow )
-        $ADDLayout.Controls.Add( $ListLabelRow )
+        $ADDLayout.Controls.Add( $ListLabel )
     }
     
     If( $Horizontal ) {
         $ControlColumn = New-Object System.Windows.Forms.ColumnStyle( [System.Windows.Forms.SizeType]::Percent, $ColumnDivision )
-        $null = $ADDLayout.ColumnStyles.Add( $ControlColumn )
+        [void]$ADDLayout.ColumnStyles.Add( $ControlColumn )
     }
     $ControlRow = New-Object System.Windows.Forms.RowStyle( [System.Windows.Forms.SizeType]::Percent, $RowDivision )
     $ADDLayout.RowStyles.Add( $ControlRow )
@@ -246,12 +332,47 @@ Function Format-Button {
 Function Format-Checkbox {
     Param(
         [Parameter( Mandatory=$true, Position=0 )]
-        [string] $Label
+        [ValidateNotNullOrEmpty()]
+        [string] $Name,
+        [Parameter( Mandatory=$true, Position=1 )]
+        [ValidateNotNullOrEmpty()]
+        [string] $Label,
+        [Parameter( Position=2 )]
+        [string] $Value = $false
     )
     $ADDCheck = New-Object System.Windows.Forms.Checkbox
+    $ADDCheck.Name = $Name
     $ADDCheck.Text = $Label
+    $ADDCheck.CheckState = If( `
+        -not $Value -or `
+        $Value -eq $null `
+        -or $Value -eq '' `
+        -or $Value -eq 'False' `
+        -or $Value -eq 'false' `
+        -or $Value -eq 'No' `
+        -or $Value -eq 'no' `
+    ) { [System.Windows.Forms.CheckState]::Unchecked } Else { [System.Windows.Forms.CheckState]::Checked }
 
     Return $ADDCheck
+}
+
+Function Format-TextBox {
+    Param(
+        [Parameter( Mandatory=$true, Position=0 )]
+        [ValidateNotNullOrEmpty()]
+        [string] $Name,
+        [Parameter( Position=1 )]
+        [string] $Value
+    )
+
+    $ADDText = New-Object System.Windows.Forms.Textbox
+
+    $ADDText.Name = $Name
+    If( $Value -ne $null ) {
+        $ADDText.Text = $Value
+    }
+
+    Return $ADDText
 }
 
 Function Format-ListBox {
@@ -277,7 +398,7 @@ Function Format-ListBox {
 
     $i = 0
     # If we don't assign to $null, the list items pollute the return stream.
-    $null = $ObjectList | ForEach-Object {
+    $ObjectList | ForEach-Object {
         $i++
         $ObjectName = $_.Name
 
@@ -287,7 +408,7 @@ Function Format-ListBox {
             $ObjectName += " [Locked]"
         }
 
-		$ListBox.Items.Add( $ObjectName )
+		[void]$ListBox.Items.Add( $ObjectName )
 
         Write-Progress -Activity "Building Object List" -Status “Adding $ObjectName” `
             -PercentComplete ($i / $ObjectList.Count * 100)
