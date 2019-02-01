@@ -60,7 +60,7 @@ Function Applet-Users {
 
 	# Build the form.
 
-	$ADDForm = New-ADDForm -Title 'AD Users'
+	$ADDForm = New-ADDForm -Title 'AD Users' -Rows 2
 	
 	#$ADDUsers = Get-ADObject -SearchBase 'OU=Users,OU=Albany,DC=domain,DC=local' `
     #    -Filter $UsersFilter -Properties DistinguishedName,Enabled,Name,SamAccountName,SID,LockedOut | 
@@ -73,20 +73,19 @@ Function Applet-Users {
         Return
     }
 	$ADDList = Format-ListBox -ObjectList $ADDUsers | `
-        New-ADDFormControl -Parent $ADDForm -h 290 -w 300 -Anchor ( `
-            [System.Windows.Forms.AnchorStyles]::Left + `
-            [System.Windows.Forms.AnchorStyles]::Right + `
-            [System.Windows.Forms.AnchorStyles]::Top + `
-            [System.Windows.Forms.AnchorStyles]::Bottom)
+        New-ADDFormControl -Parent $ADDForm -Layout 'MainLayout' -RowDivision 90
+
+    New-ADDFormPanel -Columns 3 -Name 'ButtonsLayout' | `
+        New-ADDFormControl -Parent $ADDForm -Layout 'MainLayout' -RowDivision 10
 
     Format-Button -DialogResult OK -Label 'Hide Disabled' -LabelFalse 'Show Disabled' -LabelTest $ShowDisabled | `
-        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'ButtonsLayout' -RowDivision 33
 
     Format-Button -DialogResult Retry -Label 'Set Password' | `
-        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'ButtonsLayout' -RowDivision 33
 
     Format-Button -DialogResult Ignore -Label 'Unlock Account' | `
-        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'ButtonsLayout' -RowDivision 33
 
 	$ADDResult = $ADDForm.ShowDialog()
 
@@ -139,7 +138,7 @@ Function Applet-NewUser {
     }
     $ADDTitleGroups = $ADDTitleGroupsD + $ADDTitleGroupsS
 	$ADDTitleList = Format-ListBox -ForceEnabled $true -DropDown $true -ObjectList $ADDTitleGroups
-    New-ADDFormControl -Parent $ADDForm -LabelText 'Title Group' -Control $ADDTitleList
+    New-ADDFormControl -Parent $ADDForm -LabelText 'Title Group' -Control $ADDTitleList -Layout 'MainLayout'
 
     # Department Groups List
     $ADDDeptGroups = Get-RemoteADObject -OU 'OU=Departments,OU=Security,OU=Groups,OU=Albany,DC=domain,DC=local' `
@@ -149,19 +148,19 @@ Function Applet-NewUser {
         #Return
     }
 	$ADDDeptList = Format-ListBox -ForceEnabled $true -DropDown $true -ObjectList $ADDDeptGroups
-    New-ADDFormControl -Parent $ADDForm -LabelText 'Department Group' -Control $ADDDeptList
+    New-ADDFormControl -Parent $ADDForm -LabelText 'Department Group' -Control $ADDDeptList -Layout 'MainLayout'
 
     $ADDAccountantGroup = Format-Checkbox 'Accountants Group'
-    New-ADDFormControl -Parent $ADDForm -Control $ADDAccountantGroup
+    New-ADDFormControl -Parent $ADDForm -Control $ADDAccountantGroup -Layout 'MainLayout'
     
     $ADDDuoGroup = Format-Checkbox 'Citrix Duo Group'
-    New-ADDFormControl -Parent $ADDForm -Control $ADDDuoGroup
+    New-ADDFormControl -Parent $ADDForm -Control $ADDDuoGroup -Layout 'MainLayout'
     
     $ADDNativePrinterGroup = Format-Checkbox 'Citrix Native Printer Group'
-    New-ADDFormControl -Parent $ADDForm -Control $ADDNativePrinterGroup
+    New-ADDFormControl -Parent $ADDForm -Control $ADDNativePrinterGroup -Layout 'MainLayout'
     
     $ADDWomenGroup = Format-Checkbox 'Women Group'
-    New-ADDFormControl -Parent $ADDForm -Control $ADDWomenGroup
+    New-ADDFormControl -Parent $ADDForm -Control $ADDWomenGroup -Layout 'MainLayout'
 
 	$ADDResult = $ADDForm.ShowDialog()
 
@@ -187,16 +186,19 @@ Function Applet-Computers {
     $ADDComputers = Get-RemoteADObject -OU 'OU=Computers,OU=Albany,DC=domain,DC=local' `
         -ObjectType 'Computer' -Filter $ComputersFilter -AdminCredential $AdminCredential
     $ADDList = Format-ListBox -ObjectList $ADDComputers
-    New-ADDFormControl -Parent $ADDForm -Control $ADDList
+    New-ADDFormControl -Parent $ADDForm -Control $ADDList -Layout 'MainLayout' -RowDivision 90
     If( $ADDComputers -eq $null -or $ADDList -eq $null -or $ADDComputers.Length -eq 0 ) {
         Out-Dialog -Message $Error -DialogType 'Error'
         Return
     }
+    
+    New-ADDFormPanel -Columns 2 -Name 'ButtonsLayout' | `
+        New-ADDFormControl -Parent $ADDForm -Layout 'MainLayout' -RowDivision 10
 
     Format-Button -DialogResult OK -Label 'Hide Disabled' -LabelFalse 'Show Disabled' -LabelTest $ShowDisabled | `
-        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+        New-ADDFormControl -Parent $ADDForm -Layout 'ButtonsLayout' -Horizontal $true -RowDivision 50
     Format-Button -DialogResult Ignore -Label 'Bitlocker Key' | `
-        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+        New-ADDFormControl -Parent $ADDForm -Layout 'ButtonsLayout' -Horizontal $true -RowDivision 50
 
 	$ADDResult = $ADDForm.ShowDialog()
 
@@ -227,14 +229,14 @@ Function Applet-Choose {
     )
 
 	# Build the form.
+	$ADDForm = New-ADDForm -Height 170 -Columns 3
 
-	$ADDForm = New-ADDForm -Height 170
     $null = Format-Button -DialogResult Retry -Label 'Users' | `
-        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 33
     $null = Format-Button -DialogResult Ignore -Label 'Computers' | `
-        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 33
     $null = Format-Button -DialogResult No -Label 'New User' | `
-        New-ADDFormControl -Parent $ADDForm -Anchor None -w 80 -h 60
+        New-ADDFormControl -Parent $ADDForm -Horizontal $true -Layout 'MainLayout' -RowDivision 33
     $ADDResult = $ADDForm.ShowDialog()
 
 	If( $ADDResult -eq [System.Windows.Forms.DialogResult]::Retry ) {
