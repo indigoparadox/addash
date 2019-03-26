@@ -28,6 +28,21 @@ Set-Variable AddWindowHeight -Option Constant -Value 320
 Set-Variable AddWindowMargin -Option Constant -Value 10
 Set-Variable ADDControlDefaultSingleLineHeight -Option Constant -Value 15
 
+Function Get-YesNo {
+    Param(
+        [ValidateNotNullOrEmpty()]
+        [string] $Message,
+        [ValidateNotNullOrEmpty()]
+        [string] $Title
+    )
+
+    $yes = New-Object Management.Automation.Host.ChoiceDescription '&Yes'
+    $no  = New-Object Management.Automation.Host.ChoiceDescription '&No'
+    $options = [Management.Automation.Host.ChoiceDescription[]]($yes, $no)
+    $default = 1  # $no
+    Return $Host.UI.PromptForChoice( $Title, $Message, $options, $default )
+}
+
 Function Get-Registry {
     Param(
         [ValidateNotNullOrEmpty()]
