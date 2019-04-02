@@ -209,7 +209,8 @@ Function New-ADDFormControl {
         [string] $Layout,
         [bool] $Horizontal = $false,
         [int] $RowDivision = 100,
-        [int] $ColumnDivision = 100
+        [int] $ColumnDivision = 100,
+        [int] $LabelrowDivision = 20
     )
 
     # Fetch the layout from the parent form.
@@ -231,7 +232,7 @@ Function New-ADDFormControl {
             $LabelColumn = New-Object System.Windows.Forms.ColumnStyle( [System.Windows.Forms.SizeType]::Percent, $ColumnDivision )
             [void]$ADDLayout.ColumnStyles.Add( $LabelColumn )
         }
-        $ListLabelRow = New-Object System.Windows.Forms.RowStyle( [System.Windows.Forms.SizeType]::Percent, $RowDivision )
+        $ListLabelRow = New-Object System.Windows.Forms.RowStyle( [System.Windows.Forms.SizeType]::Percent, $LabelrowDivision )
         $ADDLayout.RowStyles.Add( $ListLabelRow )
         $ADDLayout.Controls.Add( $ListLabel )
     }
@@ -377,11 +378,16 @@ Function Format-TextBox {
         [ValidateNotNullOrEmpty()]
         [string] $Name,
         [Parameter( Position=1 )]
-        [string] $Value
+        [string] $Value,
+        [int]$Lines=1
     )
 
     $ADDText = New-Object System.Windows.Forms.Textbox
-
+    
+    If( $Lines -gt 1 ) {
+        $ADDText.Multiline = $true
+        $ADDText.Lines = $Lines
+    }
     $ADDText.Name = $Name
     If( $Value -ne $null ) {
         $ADDText.Text = $Value
@@ -427,6 +433,44 @@ Function Format-ListBox {
 
         Write-Progress -Activity "Building Object List" -Status “Adding $ObjectName” `
             -PercentComplete ($i / $ObjectList.Count * 100)
+	}
+
+    Write-Progress -Activity "Building Object List" -Completed $true
+    
+	#$Parent.Controls.Add( $ListBox )
+    #New-ADDFormControl -Parent $Parent -Control $ListBox
+
+    Return $ListBox
+}
+
+Function Format-StringListBox {
+    Param(
+        [Parameter(ValueFromPipeline=$true)]
+        [string[]] $StringList,
+        [bool] $DropDown = $false
+    )
+
+    If( $DropDown -eq $false ) {
+	    $ListBox = New-Object System.Windows.Forms.ListBox
+
+        $ListBox.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
+        $ListBox.Add_DrawItem( $UserList_DrawItem )
+    } Else {
+	    $ListBox = New-Object System.Windows.Forms.ComboBox
+
+	    $ListBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+        #$ListBox.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
+        #$ListBox.Add_DrawItem( $UserList_DrawItem )
+    }
+
+    $i = 0
+    # If we don't assign to $null, the list items pollute the return stream.
+    $StringList | ForEach-Object {
+        $i++
+		[void]$ListBox.Items.Add( $_ )
+
+        Write-Progress -Activity "Building Object List" -Status “Adding $_” `
+            -PercentComplete ($i / $StringList.Count * 100)
 	}
 
     Write-Progress -Activity "Building Object List" -Completed $true
