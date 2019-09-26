@@ -16,6 +16,7 @@ Function Get-uBlockSettingsGPO {
             $ublockSettingsStruct = $($ublockSettingsKey.Value | Out-String | ConvertFrom-Json -Verbose)
             $ublockSettingsGPO = [PSCustomObject]@{
                 Settings = $ublockSettingsStruct
+                SettingsRawJson = $ublockSettingsKey.Value | Out-String
                 GPOGuid = $_.Id
                 GPOName = $_.DisplayName
             }
@@ -32,11 +33,9 @@ Function Show-UBWhitelistEditBox {
     
     $editForm = New-ADDForm -Title $('Editing Whitelist')
     
-    $bmRenameText = Format-TextBox -Name 'Name' -Value $bmNameIn
-    $null = $bmRenameText | New-ADDFormControl -Parent $editForm -Layout 'MainLayout' -LabelText 'Name'
-    
-    $bmEditText = Format-TextBox -Name 'URL' -Value $bmURLIn
-    $null = $bmEditText | New-ADDFormControl -Parent $editForm -Layout 'MainLayout' -LabelText 'URL'
+    # Create the dialog.
+    $bmRenameText = Format-TextBox -Name 'Name' -Value $WLInput
+    $null = $bmRenameText | New-ADDFormControl -Parent $editForm -Layout 'MainLayout' -LabelText 'Domain'
     
     $null = New-ADDFormPanel -Columns 2 -Name 'ButtonsLayout' | `
         New-ADDFormControl -Parent $editForm -Layout 'MainLayout'
@@ -47,11 +46,9 @@ Function Show-UBWhitelistEditBox {
 
 	$formResult = $editForm.ShowDialog()
 
+    # Return text on OK or null on cancel.
     If( $formResult -eq [System.Windows.Forms.DialogResult]::OK ) {
-        Return [PSCustomObject]@{
-            name = $bmRenameText.Text
-            url = $bmEditText.Text
-        }
+        Return $bmRenameText.Text
     } Else {
         Return $null
     }
@@ -59,61 +56,64 @@ Function Show-UBWhitelistEditBox {
 
 # Present the bookmarks list. This function recurses, with each iteration modifying the list until the
 # "Close" button is pressed, at which point the final list is passed back up to the top.
-Function Show-BookmarksList {
+Function Show-Whitelist {
     Param(
         [PSCustomObject[]]$WLList
     )
 
     $mbNamesList = @()
 
-    $mbForm = New-ADDForm -Title 'uBlock Whitelisted Domains'
+    $wlForm = New-ADDForm -Title 'uBlock Whitelisted Domains'
 
     $Error.Clear()
 
-	$mbListBox = Format-StringListBox -StringList $WLList
-    $null = New-ADDFormControl -Parent $mbForm -Control $mbListBox -Layout 'MainLayout'
+    # Create the dialog.
+	$WLListBox = Format-StringListBox -StringList $WLList
+    $null = New-ADDFormControl -Parent $wlForm -Control $WLListBox -Layout 'MainLayout'
 
     $null = New-ADDFormPanel -Columns 4 -Name 'ButtonsLayout' | `
-        New-ADDFormControl -Parent $mbForm -Layout 'MainLayout' -RowDivision 20
+        New-ADDFormControl -Parent $wlForm -Layout 'MainLayout' -RowDivision 20
     $null = Format-Button -DialogResult OK -Label 'Create' | `
-        New-ADDFormControl -Parent $mbForm -Horizontal $true -Layout 'ButtonsLayout'
+        New-ADDFormControl -Parent $wlForm -Horizontal $true -Layout 'ButtonsLayout'
     $null = Format-Button -DialogResult Retry -Label 'Edit' | `
-        New-ADDFormControl -Parent $mbForm -Horizontal $true -Layout 'ButtonsLayout'
+        New-ADDFormControl -Parent $wlForm -Horizontal $true -Layout 'ButtonsLayout'
     $null = Format-Button -DialogResult Ignore -Label 'Remove' | `
-        New-ADDFormControl -Parent $mbForm -Horizontal $true -Layout 'ButtonsLayout'
+        New-ADDFormControl -Parent $wlForm -Horizontal $true -Layout 'ButtonsLayout'
     $null = Format-Button -DialogResult Cancel -Label 'Close' | `
-        New-ADDFormControl -Parent $mbForm -Horizontal $true -Layout 'ButtonsLayout'
+        New-ADDFormControl -Parent $wlForm -Horizontal $true -Layout 'ButtonsLayout'
 
-	$formResult = $mbForm.ShowDialog()
-    $mbIndex = $mbListBox.SelectedIndex
+	$formResult = $wlForm.ShowDialog()
+    $wlIndex = $WLListBox.SelectedIndex
 
+    # Parse the button feedback from the dialog.
+    # Note that OK/Retry/Ignore are not the literal button labels. See DialogResult parms above
+    # for translations.
     If( $formResult -eq [System.Windows.Forms.DialogResult]::OK ) {
         # Create
-        $newMB = Show-BookmarkEditBox
-        If( $newMB -ne $null ) {
-            Write-Debug "Created ${$newMB.name} to point to: ${$newMB.url}"
-            $MBList += $newMB
+        $newItem = Show-UBWhitelistEditBox
+        If( $newItem -ne $null ) {
+            Write-Debug "Added $newItem to list."
+            $WLList += $newItem
         }
-        $MBList = $(Show-BookmarksList -MBList $MBList)
+        $WLList = $(Show-Whitelist -WLList $WLList)
     } ElseIf( $formResult -eq [System.Windows.Forms.DialogResult]::Retry ) {
         # Edit
-        $editedMB = Show-BookmarkEditBox -BMInput $MBList[$mbIndex]
-        If( $editedMB -ne $null ) {
-            Write-Debug "Edited ($mbIndex) ${$editedMB.name} to point to: ${$editedMB.url}"
-            $MBList[$mbIndex].url = $editedMB.url
-            $MBList[$mbIndex].name = $editedMB.name
+        $editedItem = Show-UBWhitelistEditBox -WLInput $WLList[$wlIndex]
+        If( $editedItem -ne $null ) {
+            Write-Debug "Edited ($wlIndex): $editedItem"
+            $WLList[$wlIndex] = $editedItem
         }
-        $MBList = $(Show-BookmarksList -MBList $MBList)
+        $WLList = $(Show-Whitelist -WLList $WLList)
     } ElseIf( $formResult -eq [System.Windows.Forms.DialogResult]::Ignore ) {
         # Remove
-        $removeName = $MBList[$mbIndex].name
-        $MBList = $MBList | Where-Object { $_.name -ne $removeName }
-        $MBList = $(Show-BookmarksList -MBList $MBList)
+        $removeItem = $WLList[$wlIndex]
+        $WLList = $WLList | Where-Object { $_ -ne $removeItem }
+        $WLList = $(Show-Whitelist -WLList $WLList)
     } Else {
         # Close
     }
 
-    Return $MBList
+    Return $WLList
 }
 
 # Show the resulting JSON for manual verification before committing.
@@ -122,7 +122,7 @@ Function Get-SaveBox {
         [string]$JsonInput
     )
 
-    $jsonForm = New-ADDForm -Title 'Managed Bookmarks' -Width 480 -Height 640
+    $jsonForm = New-ADDForm -Title 'uBlock Settings' -Width 480 -Height 640
 
     $Error.Clear()
 
@@ -149,18 +149,23 @@ Function Get-SaveBox {
 #$AdminCredential = Get-AdminCredential -AdminName 'domain\administrator' -SavePasswords $True -RegistryPath 'Software\MBE'
 
 $ublockSettingsGPO = Get-uBlockSettingsGPO
-$bookmarksListNew = Show-BookmarksList -WLList $ublockSettingsGPO.Settings.netWhitelist
+Write-Host "Old settings: " + $ublockSettingsGPO.SettingsRawJson
+# Parse uBlock's weird format with literal "\n"s.
+$ublockWL = $ublockSettingsGPO.Settings.netWhitelist -Split( "\n" )
+$whiteListNew = Show-Whitelist -WLList $ublockWL
 
-#$bmJson = $bookmarksListNew | ConvertTo-Json | Out-String
-#$bmJson = $bmJson -replace "`n", ""
-#$bmJson = $bmJson -replace "    ", ""
+$ublockSettingsGPO.Settings.netWhitelist = $whiteListNew -join( "\n" )
+$ubJson = $ublockSettingsGPO.Settings | ConvertTo-Json | Out-String
+# Get rid of pretty formatting (newlines, spaces).
+$ubJson = $ubJson -replace "`n", ""
+$ubJson = $ubJson -replace "    ", ""
+$ubJson = $ubJson -replace '\\n', "n"
+Write-Host "New settings: " + $ubJson
 
-#If( Get-SaveBox -JsonInput $bmJson ) {
+If( Get-SaveBox -JsonInput $ubJson ) {
 #    Set-GPRegistryValue -Guid $ublockSettingsGPO.GPOGuid `
 #        -Key "HKCU\Software\Policies\Google\Chrome" `
 #        -Type String `
 #        -ValueName "ManagedBookmarks" -Value $bmJson
-#   Out-Dialog -Message "Saved!"
-#}
-
-#
+   Out-Dialog -Message "Saved!"
+}
