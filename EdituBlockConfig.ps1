@@ -1,4 +1,4 @@
-﻿#
+#
 # EditManagedBookmarks.ps1
 # Last Updated: indigoparadox, 2019/04/02
 #
@@ -163,9 +163,16 @@ $ubJson = $ubJson -replace '\\n', "n"
 Write-Host "New settings: " + $ubJson
 
 If( Get-SaveBox -JsonInput $ubJson ) {
-#    Set-GPRegistryValue -Guid $ublockSettingsGPO.GPOGuid `
-#        -Key "HKCU\Software\Policies\Google\Chrome" `
-#        -Type String `
-#        -ValueName "ManagedBookmarks" -Value $bmJson
+    Remove-GPPrefRegistryValue -Guid $ublockSettingsGPO.GPOGuid `
+        -Context Computer `
+        -Key "HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\Extensions\cjpalhdlnbpafiamejdnhcphjbkeiagm\policy" `
+        -ValueName "adminSettings" `
+        -ErrorAction SilentlyContinue
+    Set-GPPrefRegistryValue -Guid $ublockSettingsGPO.GPOGuid `
+        -Context Computer `
+        -Action Replace `
+        -Key "HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\Extensions\cjpalhdlnbpafiamejdnhcphjbkeiagm\policy" `
+        -Type String `
+        -ValueName "adminSettings" -Value $ubJson
    Out-Dialog -Message "Saved!"
 }
